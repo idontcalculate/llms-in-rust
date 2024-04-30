@@ -1,70 +1,54 @@
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, Write};
-use std::path::Path; // Correct import for Path
-
+use std::path::Path;
 use csv::Reader;
-use llm_chain::{executor, parameters, prompt, step::Step};
-
-// Correctly use dotenvy crate
+use std::env;
 use dotenvy::dotenv;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize dotenv
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
+    println!("Environment variables loaded.");
 
-    // Initialize the Tokio runtime; note that we have to conditionally compile the correct runtime initialization based on the Tokio version.
-    #[cfg(feature = "full")]
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    
-    #[cfg(not(feature = "full"))]
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
+    let _api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not found in .env file");
+    println!("API key retrieved successfully.");
 
-    rt.block_on(async {
-        let exec = executor!().expect("Failed to create executor");
+    let path = Path::new("src/Salary_Data.csv");
+    let file = File::open(&path).expect(&format!("Couldn't open {}", path.display()));
+    println!("CSV file opened successfully.");
 
-        // Open 'Salary_Data.csv' in the current working directory
-        let path = Path::new("Salary_Data.csv");
+    let mut reader = Reader::from_reader(file);
+    let mut csv_data = String::new();
 
-        let file = File::open(&path)
-            .expect(&format!("couldn't open {}", path.display()));
-        
-        let mut reader = Reader::from_reader(file);
+    for result in reader.records() {
+        let record = result?;
+        csv_data.push_str(&record.iter().collect::<Vec<_>>().join(","));
+        csv_data.push('\n');
+    }
 
-        let mut csv_data = String::new();
-        for result in reader.records() {
-            let record = result?;
-            csv_data.push_str(&record.iter().collect::<Vec<_>>().join(","));
-            csv_data.push('\n');
-        }
+    println!("CSV data loaded successfully. First line: {}", csv_data.lines().next().unwrap_or("No data"));
 
-        loop {
-            println!("Enter your prompt (or 'quit' to exit):");
-            io::stdout().flush()?;
+    while let true = prompt_user().await? {
+        // continue prompting user
+    }
 
-            let mut user_prompt = String::new();
-            io::stdin().read_line(&mut user_prompt)?;
-            let user_prompt = user_prompt.trim(); // No need to convert back to String
+    Ok(())
+}
 
-            if user_prompt.eq_ignore_ascii_case("quit") {
-                break;
-            }
+async fn prompt_user() -> Result<bool, Box<dyn Error>> {
+    println!("Enter your prompt (or 'quit' to exit):");
+    io::stdout().flush()?;
 
-            let prompt_string = format!(
-                "You are a data analyst tasked with analyzing a CSV file containing information about individuals, including their Age, Gender, Education Level, Job Title, Years of Experience, Salary. Your goal is to provide clear and concise answers to the given questions based on the data provided.\n\nQuestion: {}\n\nCSV Data:\n{}",
-                user_prompt, csv_data
-            );
+    let mut user_prompt = String::new();
+    io::stdin().read_line(&mut user_prompt)?;
+    let user_prompt = user_prompt.trim();
 
-            let step = Step::for_prompt_template(prompt!("{}", &prompt_string));
+    if user_prompt.eq_ignore_ascii_case("quit") {
+        println!("Quit command received, exiting loop.");
+        return Ok(false);
+    }
 
-            let res = step.run(&parameters!(), &exec).await?;
-            println!("{}", res.to_immediate().await?.as_content());
-        }
-
-        Ok(())
-    })
+    println!("You entered: {}", user_prompt);
+    Ok(true)
 }
